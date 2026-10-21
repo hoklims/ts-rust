@@ -1572,7 +1572,14 @@ impl<'a> Scanner<'a> {
                             break 'sw;
                         }
                         let (mut ch, mut size) = self.char_and_size();
-                        if ch == RUNE_ERROR {
+                        // JavaScript strings can retain an unpaired UTF-16 unit.
+                        // It is an invalid source character, not binary UTF-8.
+                        if ch == RUNE_ERROR
+                            && !matches!(
+                                go_unit_at(&self.text, self.scanner_state.pos as usize).0,
+                                GoUnit::Surrogate(_)
+                            )
+                        {
                             self.error_at(diag::File_appears_to_be_binary, 0, 0, Vec::new());
                             self.scanner_state.pos = self.text.len() as i32;
                             self.scanner_state.token = SyntaxKind::NonTextFileMarkerTrivia;
@@ -1936,6 +1943,10 @@ impl<'a> Scanner<'a> {
         self.scanner_state.token
     }
 }
+
+#[cfg(test)]
+#[path = "t00_utf16_source_tests.rs"]
+mod t00_utf16_source_tests;
 
 #[cfg(test)]
 mod tests {
