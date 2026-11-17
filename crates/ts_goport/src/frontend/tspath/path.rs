@@ -367,6 +367,20 @@ pub fn get_encoded_root_length(path: &str) -> i32 {
     }
     let ch0 = bytes[0];
 
+    // A drive-verbatim Windows root keeps both its namespace and drive.
+    // It must not enter the generic UNC branch, which would stop at "//?/".
+    if ln >= 7
+        && (ch0 == b'/' || ch0 == b'\\')
+        && bytes[1] == ch0
+        && bytes[2] == b'?'
+        && bytes[3] == ch0
+        && is_volume_character(bytes[4])
+        && bytes[5] == b':'
+        && (bytes[6] == b'/' || bytes[6] == b'\\')
+    {
+        return 7;
+    }
+
     // POSIX or UNC
     if ch0 == b'/' || ch0 == b'\\' {
         if ln == 1 || bytes[1] != ch0 {
@@ -2416,6 +2430,46 @@ mod component_ref_tests {
                 reduce_path_component_refs(borrowed),
                 "reduced parts of {name:?}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod drive_verbatim_root_tests {
+    use super::*;
+
+    #[test]
+    fn drive_verbatim_roots_keep_the_drive_and_namespace() {
+        assert_eq!(get_root_length("//?/C:/repo/main.ts"), 7);
+        assert_eq!(get_root_length(r"\\?\C:\repo\main.ts"), 7);
+        assert_eq!(get_directory_path("//?/C:/"), "//?/C:/");
+        assert_eq!(get_directory_path("//?/C:/repo"), "//?/C:/");
+        let mut current = "//?/C:/repo/src".to_string();
+        let mut ancestors = vec![];
+        loop {
+            ancestors.push(current.clone());
+            let parent = get_directory_path(&current);
+            if parent == current {
+                break;
+            }
+            current = parent;
+        }
+        assert_eq!(ancestors, ["//?/C:/repo/src", "//?/C:/repo", "//?/C:/"]);
+    }
+
+    #[test]
+    fn other_root_kinds_are_not_promoted_to_drive_verbatim() {
+        assert_eq!(get_root_length("C:/repo/main.ts"), 3);
+        assert_eq!(get_root_length("/repo/main.ts"), 1);
+        assert_eq!(get_root_length("//server/share/main.ts"), 9);
+        for path in [
+            "//?/UNC/server/share/main.ts",
+            "//./C:/repo/main.ts",
+            "//?/1:/repo/main.ts",
+            "//?/C:relative",
+            "//?/",
+        ] {
+            assert_ne!(get_root_length(path), 7, "unsupported drive root: {path}");
         }
     }
 }
